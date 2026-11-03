@@ -1,0 +1,18 @@
+newmtl habito
+Kd 0.2941 0.1647 0.0902
+
+newmtl pele
+Kd 0.4196 0.2471 0.1490
+
+newmtl dourado
+Kd 0.8510 0.6824 0.3059
+
+newmtl branco
+Kd 0.9529 0.9412 0.9176
+
+newmtl escuro
+Kd 0.1098 0.0706 0.0510
+
+newmtl pele2
+Kd 0.9490 0.7882 0.6275
+
