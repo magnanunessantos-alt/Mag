@@ -130,7 +130,7 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
             mu, rr = mu_n, rr_n
         eye_fit.append((mu, rr, rr.mean()))
     eye_cz = np.mean([e[0][1] for e in eye_fit]); eye_r = np.mean([e[2] for e in eye_fit])
-    head = front & (cen[:, 2] > eye_cz - 3.2 * eye_r) & (np.abs(cen[:, 0]) < float(os.environ.get("ROSTO_LARG", "4.5")) * eye_r)
+    head = front & (cen[:, 2] > eye_cz - float(os.environ.get("ROSTO_ZMIN", "3.2")) * eye_r) & (np.abs(cen[:, 0]) < float(os.environ.get("ROSTO_LARG", "4.5")) * eye_r)
     # nariz: ponto mais a frente entre os olhos e a boca
     nz = head & (cen[:, 2] < eye_cz) & (cen[:, 2] > eye_cz - 2 * eye_r) & (np.abs(cen[:, 0]) < eye_r)
     nose = cen[nz][np.argmin(cen[nz, 1])]
@@ -138,7 +138,7 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
         mu, rr, a_ = eye_fit[0]
         eye_fit.append((np.array([2 * nose[0] - mu[0], mu[1]]), rr, a_))
         print("olho espelhado pelo nariz")
-    reg = (head & (cen[:, 2] < eye_cz - 1.05 * eye_r) & (lab[:, 0] > float(os.environ.get("BARBA_LMIN", "33")))
+    reg = (head & (m.face_normals[:, 1] < float(os.environ.get("BARBA_NY", "1.0"))) & (cen[:, 2] < eye_cz - float(os.environ.get("BARBA_ZTOP", "1.05")) * eye_r) & (lab[:, 0] > float(os.environ.get("BARBA_LMIN", "33")))
            & (np.linalg.norm(cen - nose, axis=1) > 0.55 * eye_r))
     if not os.environ.get("BARBA_LISA"):
         reg = np.zeros(len(cen), bool)
@@ -154,7 +154,7 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
         lam = 0.6 if it % 2 == 0 else -0.62
         V2[move] += lam * (acc[move] / cnt[move, None] - V2[move])
     if int(os.environ.get("BARBA_LAP", "0")):   # Laplaciano com peso que some na borda (sem degrau)
-        zt = eye_cz - 1.05 * eye_r
+        zt = eye_cz - float(os.environ.get("BARBA_ZTOP", "1.05")) * eye_r
         wv = np.clip((zt - V2[:, 2]) / (0.9 * eye_r), 0, 1)
         wv = (wv * wv * (3 - 2 * wv))[:, None]
         for it in range(int(os.environ.get("BARBA_LAP"))):
@@ -162,6 +162,50 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
             np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
             np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
             V2[move] += 0.5 * wv[move] * (acc[move] / cnt[move, None] - V2[move])
+    if os.environ.get("QUEIXO_PLANO"):   # recua o volume da barba ate a superficie do rosto
+        vnrm = m.vertex_normals
+        dE = np.min([np.linalg.norm((V2[:, [0, 2]] - mu) / rr, axis=1) for mu, rr, _ in eye_fit], 0)
+        dN = np.linalg.norm(V2[:, [0, 2]] - nose[[0, 2]], axis=1)
+        fitv = ((V2[:, 2] > eye_cz - 1.1 * eye_r) & (V2[:, 2] < eye_cz + 2.2 * eye_r) & (dE > 1.4) & (dN > 1.3 * eye_r)
+                & (np.abs(V2[:, 0]) < 4.0 * eye_r) & (vnrm[:, 1] < -0.5) & (V2[:, 1] < nose[1] + 3 * eye_r))
+        X, Z = V2[fitv, 0] - nose[0], V2[fitv, 2] - eye_cz
+        A = np.c_[np.ones_like(X), X, Z, X * X, Z * Z, X * Z]
+        cfq = np.linalg.lstsq(A, V2[fitv, 1], rcond=None)[0]
+        def yface(x, z):
+            x = x - nose[0]; z = np.maximum(z - eye_cz, -2.6 * eye_r)
+            return np.c_[np.ones_like(x), x, z, x * x, z * z, x * z] @ cfq
+        zt = eye_cz - 1.05 * eye_r
+        sel = (V2[:, 2] < zt) & (V2[:, 2] > eye_cz - 3.6 * eye_r) & (np.abs(V2[:, 0]) < 4.6 * eye_r) & (V2[:, 1] < nose[1] + 4 * eye_r)
+        tgt = yface(V2[sel, 0], V2[sel, 2])
+        wz = np.clip((zt - V2[sel, 2]) / (0.6 * eye_r), 0, 1); wz = wz * wz * (3 - 2 * wz)
+        push = np.clip(tgt - V2[sel, 1], 0, float(os.environ.get("QUEIXO_PLANO"))) * wz
+        V2[sel, 1] += push
+        qmove = np.zeros(len(V2), bool); qmove[sel] = push > 1e-3
+        for it in range(30):
+            acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+            np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+            np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+            V2[qmove] += 0.5 * (acc[qmove] / cnt[qmove, None] - V2[qmove])
+        print("queixo plano: recuo max", round(push.max(), 2), "mm em", int(qmove.sum()), "vertices")
+    if os.environ.get("QUEIXO_MEMBRANA"):   # frente do queixo vira superficie lisa (membrana)
+        vnrm = m.vertex_normals
+        zt = eye_cz - float(os.environ.get("BARBA_ZTOP", "1.05")) * eye_r
+        dN = np.linalg.norm(V2[:, [0, 2]] - nose[[0, 2]], axis=1)
+        fur = vin & (V2[:, 2] < zt) & (dN > 0.6 * eye_r)
+        for it in range(int(os.environ.get("FIAPOS", "0"))):   # derrete fiapos (qualquer direcao)
+            acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+            np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+            np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+            V2[fur] += 0.6 * (acc[fur] / cnt[fur, None] - V2[fur])
+        vnrm = trimesh.Trimesh(V2, m.faces, process=False).vertex_normals
+        memb = (vin & (vnrm[:, 1] < -0.25) & (V2[:, 2] < zt) & (dN > 0.6 * eye_r))
+        # vizinhos de 2 aneis fora tambem fixos (borda)
+        for it in range(int(os.environ.get("QUEIXO_MEMBRANA"))):
+            acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+            np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+            np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+            V2[memb] += 0.7 * (acc[memb] / cnt[memb, None] - V2[memb])
+        print("membrana:", int(memb.sum()), "vertices")
     if os.environ.get("NARIZ"):   # nariz menor: encolhe so o volume do nariz em direcao a base
         fN = float(os.environ["NARIZ"])
         dxz = np.linalg.norm(V2[:, [0, 2]] - nose[[0, 2]], axis=1)
@@ -228,7 +272,9 @@ hexes = [p[2] for p in PALETTE]
 names = [p[0] for p in PALETTE]
 if barba is not None:
     pele = [i for i, n in enumerate(names) if n.lower().startswith("pele")][0]
-    lbl[barba & (lab[:, 0] > 30)] = pele   # mantem olhos/cabelo escuros fora
+    so = [i for i, n_ in enumerate(names) if any(n_.lower().startswith(p.lower()) for p in os.environ.get("BARBA_PINTA_SO", "").split(",") if p)]
+    if so: barba = barba & np.isin(lbl, so)
+    lbl[barba & (lab[:, 0] > float(os.environ.get("BARBA_PINTA_LMIN", "30")))] = pele   # mantem olhos/cabelo escuros fora
     if os.environ.get("SUAVIZAR_ROSTO"):  # contornos limpos (barba/sobrancelha) no rosto
         hf = head
         for _ in range(int(os.environ.get("SUAVIZAR_ROSTO"))):
