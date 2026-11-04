@@ -73,6 +73,34 @@ def to_lab(rgb):
     return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], 1)
 
 import os
+lab = to_lab(cols)
+barba = None
+if os.environ.get("BARBA_LISA"):
+    # barba rala esculpida em volta da boca: alisa a geometria e pinta como pele
+    cen = m.triangles_center
+    front = cen[:, 1] < np.median(cen[:, 1])
+    eyes = (lab[:, 0] < 22) & front & (cen[:, 2] > float(os.environ.get("OLHOS_ZMIN", "0.62")) * H_MM)
+    eye_zmin = np.percentile(cen[eyes, 2], 2)
+    nose_y = cen[front & (cen[:, 2] > eye_zmin - 15), 1].min()
+    reg = (front & (cen[:, 2] > eye_zmin - 16) & (cen[:, 2] < eye_zmin - 1)
+           & (lab[:, 0] > 35) & (lab[:, 0] < 68) & (lab[:, 1] > 4) & (cen[:, 1] < nose_y + 12))
+    adjF = m.face_adjacency
+    for _ in range(3):  # dilatar a regiao
+        nb = np.zeros(len(reg), bool); nb[adjF[reg[adjF[:, 0]], 1]] = True; nb[adjF[reg[adjF[:, 1]], 0]] = True
+        reg |= nb & front & (cen[:, 2] > eye_zmin - 18) & (cen[:, 2] < eye_zmin)
+    vin = np.zeros(len(m.vertices), bool); vin[m.faces[reg].ravel()] = True
+    vout = np.zeros(len(m.vertices), bool); vout[m.faces[~reg].ravel()] = True
+    move = vin & ~vout
+    ed = m.edges_unique
+    V2 = m.vertices.copy()
+    for _ in int(os.environ.get("BARBA_ITERS", "25")) * [0]:
+        acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+        np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+        np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+        V2[move] = 0.5 * V2[move] + 0.5 * acc[move] / cnt[move, None]
+    m.vertices = V2
+    barba = reg
+    print("barba alisada:", int(reg.sum()), "faces, olhos z>=", round(eye_zmin, 1))
 if os.environ.get("RAW"):
     trimesh.Trimesh(m.vertices, m.faces, face_colors=np.c_[cols.astype(np.uint8), np.full(len(cols), 255, np.uint8)], process=False).export(out + "_raw.glb")
 lab = to_lab(cols)
@@ -112,6 +140,9 @@ for _ in range(3):
 
 hexes = [p[2] for p in PALETTE]
 names = [p[0] for p in PALETTE]
+if barba is not None:
+    pele = [i for i, n in enumerate(names) if n.lower().startswith("pele")][0]
+    lbl[barba & (lab[:, 0] > 30)] = pele   # mantem olhos/cabelo escuros fora
 rgbC = np.array([hx(h) for h in hexes], float)
 print("cores:", dict(zip(names, np.bincount(lbl, minlength=K).tolist())))
 
