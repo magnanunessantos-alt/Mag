@@ -9,30 +9,40 @@ from scipy.spatial import cKDTree
 src, out = sys.argv[1], sys.argv[2]
 H_MM = float(sys.argv[3]); K = int(sys.argv[4]); TARGET = int(sys.argv[5])
 
-scene = trimesh.load(src, process=False)
-g = list(scene.dump()) if hasattr(scene, "dump") else [scene]
-g = g[0]
-tex = np.asarray(g.visual.material.baseColorTexture.convert("RGB")).astype(np.float32)
-th, tw = tex.shape[:2]
-uv = g.visual.uv
-V0 = g.vertices.copy(); F0 = g.faces
+if src.endswith(".npz"):
+    # malha ja montada (ex.: junção de duas gerações): V,F em mm (Z para cima, frente -Y)
+    # + triangulos de origem coloridos (SRC_T, SRC_C) para transferir a cor
+    d = np.load(src)
+    V0, F0 = d["V"].astype(np.float64), d["F"].astype(np.int64)
+    s_ = H_MM / (V0[:, 2].max() - V0[:, 2].min()); o_ = [V0[:, 0].mean(), V0[:, 1].mean(), V0[:, 2].min()]
+    V0 = (V0 - o_) * s_
+    SRC_CEN = (d["SRC_T"].mean(1) - o_) * s_; SRC_COL = d["SRC_C"].astype(float)
+else:
+    scene = trimesh.load(src, process=False)
+    g = list(scene.dump()) if hasattr(scene, "dump") else [scene]
+    g = g[0]
+    tex = np.asarray(g.visual.material.baseColorTexture.convert("RGB")).astype(np.float32)
+    th, tw = tex.shape[:2]
+    uv = g.visual.uv
+    V0 = g.vertices.copy(); F0 = g.faces
 
-# eixo Y-up (glTF, metros) -> Z-up (mm), frente para -Y
-V0 = np.stack([-V0[:, 2], -V0[:, 0], V0[:, 1]], 1)  # Tripo: frente em +X -> girar para -Y
-V0 -= [V0[:, 0].mean(), V0[:, 1].mean(), V0[:, 2].min()]
-V0 *= H_MM / V0[:, 2].max()
+    # eixo Y-up (glTF, metros) -> Z-up (mm), frente para -Y
+    V0 = np.stack([-V0[:, 2], -V0[:, 0], V0[:, 1]], 1)  # Tripo: frente em +X -> girar para -Y
+    V0 -= [V0[:, 0].mean(), V0[:, 1].mean(), V0[:, 2].min()]
+    V0 *= H_MM / V0[:, 2].max()
 
-def sample(uvs):
-    x = np.clip((uvs[:, 0] % 1.0) * (tw - 1), 0, tw - 1)
-    y = np.clip((1 - (uvs[:, 1] % 1.0)) * (th - 1), 0, th - 1)
-    return tex[y.round().astype(int), x.round().astype(int)]
+    def sample(uvs):
+        x = np.clip((uvs[:, 0] % 1.0) * (tw - 1), 0, tw - 1)
+        y = np.clip((1 - (uvs[:, 1] % 1.0)) * (th - 1), 0, th - 1)
+        return tex[y.round().astype(int), x.round().astype(int)]
 
-# cor de cada face original = media de 4 amostras (centro + perto dos vertices)
-fu = uv[F0]
-c = sample(fu.mean(1))
-for w in ([.6, .2, .2], [.2, .6, .2], [.2, .2, .6]):
-    c += sample(np.einsum("k,fkd->fd", np.array(w), fu))
-col0 = c / 4.0
+    # cor de cada face original = media de 4 amostras (centro + perto dos vertices)
+    fu = uv[F0]
+    c = sample(fu.mean(1))
+    for w in ([.6, .2, .2], [.2, .6, .2], [.2, .2, .6]):
+        c += sample(np.einsum("k,fkd->fd", np.array(w), fu))
+    SRC_COL = c / 4.0
+    SRC_CEN = V0[F0].mean(1)
 
 # --- simplificar malha
 mm = trimesh.Trimesh(V0, F0, process=False)
@@ -55,12 +65,12 @@ print("faces", len(F0), "->", len(m.faces), "estanque", m.is_watertight, "aresta
       "winding ok", m.is_winding_consistent)
 
 # cor de cada face nova = cor da face original mais proxima (amostras no triangulo)
-tree = cKDTree(V0[F0].mean(1))
+tree = cKDTree(SRC_CEN)
 tri = m.triangles
 pts = [tri.mean(1)] + [np.einsum("k,fkd->fd", np.array(w), tri) for w in ([.6, .2, .2], [.2, .6, .2], [.2, .2, .6])]
 cols = np.zeros((len(m.faces), 3))
 for p in pts:
-    cols += col0[tree.query(p, workers=-1)[1]]
+    cols += SRC_COL[tree.query(p, workers=-1)[1]]
 cols /= len(pts)
 
 # --- k-means em espaco Lab aproximado, ponderado por area
@@ -120,7 +130,7 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
             mu, rr = mu_n, rr_n
         eye_fit.append((mu, rr, rr.mean()))
     eye_cz = np.mean([e[0][1] for e in eye_fit]); eye_r = np.mean([e[2] for e in eye_fit])
-    head = front & (cen[:, 2] > eye_cz - 3.2 * eye_r) & (np.abs(cen[:, 0]) < 4.5 * eye_r)
+    head = front & (cen[:, 2] > eye_cz - 3.2 * eye_r) & (np.abs(cen[:, 0]) < float(os.environ.get("ROSTO_LARG", "4.5")) * eye_r)
     # nariz: ponto mais a frente entre os olhos e a boca
     nz = head & (cen[:, 2] < eye_cz) & (cen[:, 2] > eye_cz - 2 * eye_r) & (np.abs(cen[:, 0]) < eye_r)
     nose = cen[nz][np.argmin(cen[nz, 1])]
@@ -128,7 +138,7 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
         mu, rr, a_ = eye_fit[0]
         eye_fit.append((np.array([2 * nose[0] - mu[0], mu[1]]), rr, a_))
         print("olho espelhado pelo nariz")
-    reg = (head & (cen[:, 2] < eye_cz - 1.05 * eye_r) & (lab[:, 0] > 33)
+    reg = (head & (cen[:, 2] < eye_cz - 1.05 * eye_r) & (lab[:, 0] > float(os.environ.get("BARBA_LMIN", "33")))
            & (np.linalg.norm(cen - nose, axis=1) > 0.55 * eye_r))
     if not os.environ.get("BARBA_LISA"):
         reg = np.zeros(len(cen), bool)
@@ -143,9 +153,40 @@ if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
         np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
         lam = 0.6 if it % 2 == 0 else -0.62
         V2[move] += lam * (acc[move] / cnt[move, None] - V2[move])
+    if int(os.environ.get("BARBA_LAP", "0")):   # Laplaciano com peso que some na borda (sem degrau)
+        zt = eye_cz - 1.05 * eye_r
+        wv = np.clip((zt - V2[:, 2]) / (0.9 * eye_r), 0, 1)
+        wv = (wv * wv * (3 - 2 * wv))[:, None]
+        for it in range(int(os.environ.get("BARBA_LAP"))):
+            acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+            np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+            np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+            V2[move] += 0.5 * wv[move] * (acc[move] / cnt[move, None] - V2[move])
+    if os.environ.get("NARIZ"):   # nariz menor: encolhe so o volume do nariz em direcao a base
+        fN = float(os.environ["NARIZ"])
+        dxz = np.linalg.norm(V2[:, [0, 2]] - nose[[0, 2]], axis=1)
+        ring = (dxz > 0.9 * eye_r) & (dxz < 1.3 * eye_r) & (np.abs(V2[:, 1] - nose[1]) < 2 * eye_r)
+        Am = np.c_[np.ones(ring.sum()), V2[ring, 0], V2[ring, 2]]
+        cf = np.linalg.lstsq(Am, V2[ring, 1], rcond=None)[0]       # plano do rosto em volta
+        pl = cf[0] + cf[1] * V2[:, 0] + cf[2] * V2[:, 2]
+        prot = pl - V2[:, 1]                                       # quanto sai para a frente
+        sel = (dxz < 0.9 * eye_r) & (prot > 0.15)
+        bc = np.array([nose[0], cf[0] + cf[1] * nose[0] + cf[2] * nose[2], nose[2]])
+        wt = np.clip(prot[sel] / 0.8, 0, 1)[:, None]               # base quase fixa, ponta encolhe toda
+        V2[sel] = V2[sel] + (bc + (V2[sel] - bc) * fN - V2[sel]) * wt
+        nmove = np.zeros(len(V2), bool); nmove[sel] = True
+        for it in range(int(os.environ.get("NARIZ_SUAVE", "4"))):
+            acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
+            np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
+            np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
+            V2[nmove] += 0.35 * (acc[nmove] / cnt[nmove, None] - V2[nmove])
+        print("nariz: ponta", round(prot[sel].max(), 1), "mm ->", round((pl - V2[:, 1])[sel].max(), 1), "mm;", int(sel.sum()), "vertices")
     m.vertices = V2
     barba = reg
     print("rosto alisado:", int(reg.sum()), "faces; olho raio", round(eye_r, 1), "mm")
+    import json
+    json.dump({"olhos": [[float(mu[0]), float(mu[1]), float(rr.mean())] for mu, rr, _ in eye_fit],
+               "nariz": [float(v) for v in nose]}, open(out + "_rosto.json", "w"))
 if os.environ.get("RAW"):
     trimesh.Trimesh(m.vertices, m.faces, face_colors=np.c_[cols.astype(np.uint8), np.full(len(cols), 255, np.uint8)], process=False).export(out + "_raw.glb")
 lab = to_lab(cols)
