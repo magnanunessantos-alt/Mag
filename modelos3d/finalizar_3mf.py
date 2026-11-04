@@ -87,7 +87,10 @@ PALETTE = [
     ("Branco",        ["#DDD8D7", "#C1B6B4", "#988882", "#D9D7D6", "#BEB6B0"], "#EEEBE8"),
     ("Pele Menino",   ["#E5AD7B", "#D0945B", "#DCA689"], "#E8B48A"),
 ][:K]
-hx = lambda h: [int(h[i:i + 2], 16) for i in (1, 3, 5)]
+if len(sys.argv) > 6:  # paleta opcional em JSON: [[nome, [amostras...], cor_exibida], ...]
+    import json
+    PALETTE = [tuple(p) for p in json.load(open(sys.argv[6]))]
+hx =lambda h: [int(h[i:i + 2], 16) for i in (1, 3, 5)]
 refs, ref_lbl = [], []
 for i, (_, samples, _) in enumerate(PALETTE):
     for h in samples:
