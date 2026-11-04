@@ -75,32 +75,77 @@ def to_lab(rgb):
 import os
 lab = to_lab(cols)
 barba = None
-if os.environ.get("BARBA_LISA"):
+if os.environ.get("BARBA_LISA") or os.environ.get("OLHOS"):
     # barba rala esculpida em volta da boca: alisa a geometria e pinta como pele
     cen = m.triangles_center
     front = cen[:, 1] < np.median(cen[:, 1])
     eyes = (lab[:, 0] < 22) & front & (cen[:, 2] > float(os.environ.get("OLHOS_ZMIN", "0.62")) * H_MM)
     eye_zmin = np.percentile(cen[eyes, 2], 2)
-    nose_y = cen[front & (cen[:, 2] > eye_zmin - 15), 1].min()
-    reg = (front & (cen[:, 2] > eye_zmin - 16) & (cen[:, 2] < eye_zmin - 1)
-           & (lab[:, 0] > 35) & (lab[:, 0] < 68) & (lab[:, 1] > 4) & (cen[:, 1] < nose_y + 12))
+    # olhos: duas elipses (esquerda/direita) ajustadas no plano x-z
+    eye_fit = []
+    # componentes conexos de faces escuras; olho = componente grande e compacto (quase redondo)
     adjF = m.face_adjacency
-    for _ in range(3):  # dilatar a regiao
-        nb = np.zeros(len(reg), bool); nb[adjF[reg[adjF[:, 0]], 1]] = True; nb[adjF[reg[adjF[:, 1]], 0]] = True
-        reg |= nb & front & (cen[:, 2] > eye_zmin - 18) & (cen[:, 2] < eye_zmin)
+    both = eyes[adjF[:, 0]] & eyes[adjF[:, 1]]
+    import scipy.sparse as sps, scipy.sparse.csgraph as csg
+    G = sps.coo_matrix((np.ones(both.sum()), (adjF[both, 0], adjF[both, 1])), shape=(len(cen),) * 2)
+    _, comp = csg.connected_components(G, directed=False)
+    cands = []
+    for cid in np.unique(comp[eyes]):
+        s = eyes & (comp == cid)
+        A = m.area_faces[s].sum()
+        if A < 4: continue
+        p2 = cen[s][:, [0, 2]]
+        ext = np.ptp(p2, 0)
+        fill = A / (np.pi / 4 * ext[0] * ext[1] + 1e-9)
+        ny = np.average(m.face_normals[s][:, 1], weights=m.area_faces[s])
+        if (0.55 < ext[0] / ext[1] < 1.8 and fill > 0.6 and ny < -0.6
+                and (ext > 0.035 * H_MM).all() and (ext < 0.15 * H_MM).all()):
+            cands.append((A, cid, p2.mean(0)))
+    cands.sort(reverse=True)
+    sides = [c for c in cands if c[2][0] < 0][:1] + [c for c in cands if c[2][0] >= 0][:1]
+    eyes = np.isin(comp, [c[1] for c in sides]) & eyes
+    for cid in [c[1] for c in sides]:
+        sel = eyes & (comp == cid)
+        p2 = cen[sel][:, [0, 2]]
+        lo_, hi_ = np.percentile(p2, 1.5, 0), np.percentile(p2, 98.5, 0)
+        mu = (lo_ + hi_) / 2; rr = (hi_ - lo_) / 2          # elipse alinhada pelo contorno externo
+        rr0 = rr.copy(); Lthr = min(34, np.median(lab[sel, 0]) + 12)
+        for _ in range(2):  # refina com as faces escuras ao redor (borda do olho que pegou outra cor)
+            dk = front & (lab[:, 0] < Lthr) & (np.linalg.norm((cen[:, [0, 2]] - mu) / rr, axis=1) < 1.3)
+            q = cen[dk][:, [0, 2]]
+            lo_, hi_ = np.percentile(q, 1.0, 0), np.percentile(q, 99.0, 0)
+            mu_n = (lo_ + hi_) / 2; rr_n = (hi_ - lo_) / 2
+            if (rr_n > 1.3 * rr0).any():   # vazou para o cabelo: mantem a estimativa anterior
+                break
+            mu, rr = mu_n, rr_n
+        eye_fit.append((mu, rr, rr.mean()))
+    eye_cz = np.mean([e[0][1] for e in eye_fit]); eye_r = np.mean([e[2] for e in eye_fit])
+    head = front & (cen[:, 2] > eye_cz - 3.2 * eye_r) & (np.abs(cen[:, 0]) < 4.5 * eye_r)
+    # nariz: ponto mais a frente entre os olhos e a boca
+    nz = head & (cen[:, 2] < eye_cz) & (cen[:, 2] > eye_cz - 2 * eye_r) & (np.abs(cen[:, 0]) < eye_r)
+    nose = cen[nz][np.argmin(cen[nz, 1])]
+    if len(eye_fit) == 1:   # so achou um olho: espelha pelo nariz
+        mu, rr, a_ = eye_fit[0]
+        eye_fit.append((np.array([2 * nose[0] - mu[0], mu[1]]), rr, a_))
+        print("olho espelhado pelo nariz")
+    reg = (head & (cen[:, 2] < eye_cz - 1.05 * eye_r) & (lab[:, 0] > 33)
+           & (np.linalg.norm(cen - nose, axis=1) > 0.55 * eye_r))
+    if not os.environ.get("BARBA_LISA"):
+        reg = np.zeros(len(cen), bool)
     vin = np.zeros(len(m.vertices), bool); vin[m.faces[reg].ravel()] = True
     vout = np.zeros(len(m.vertices), bool); vout[m.faces[~reg].ravel()] = True
     move = vin & ~vout
     ed = m.edges_unique
     V2 = m.vertices.copy()
-    for _ in int(os.environ.get("BARBA_ITERS", "25")) * [0]:
+    for it in range(2 * int(os.environ.get("BARBA_ITERS", "40"))):   # Taubin: alisa sem encolher
         acc = np.zeros_like(V2); cnt = np.zeros(len(V2))
         np.add.at(acc, ed[:, 0], V2[ed[:, 1]]); np.add.at(acc, ed[:, 1], V2[ed[:, 0]])
         np.add.at(cnt, ed[:, 0], 1); np.add.at(cnt, ed[:, 1], 1)
-        V2[move] = 0.5 * V2[move] + 0.5 * acc[move] / cnt[move, None]
+        lam = 0.6 if it % 2 == 0 else -0.62
+        V2[move] += lam * (acc[move] / cnt[move, None] - V2[move])
     m.vertices = V2
     barba = reg
-    print("barba alisada:", int(reg.sum()), "faces, olhos z>=", round(eye_zmin, 1))
+    print("rosto alisado:", int(reg.sum()), "faces; olho raio", round(eye_r, 1), "mm")
 if os.environ.get("RAW"):
     trimesh.Trimesh(m.vertices, m.faces, face_colors=np.c_[cols.astype(np.uint8), np.full(len(cols), 255, np.uint8)], process=False).export(out + "_raw.glb")
 lab = to_lab(cols)
@@ -143,6 +188,27 @@ names = [p[0] for p in PALETTE]
 if barba is not None:
     pele = [i for i, n in enumerate(names) if n.lower().startswith("pele")][0]
     lbl[barba & (lab[:, 0] > 30)] = pele   # mantem olhos/cabelo escuros fora
+    if os.environ.get("SUAVIZAR_ROSTO"):  # contornos limpos (barba/sobrancelha) no rosto
+        hf = head
+        for _ in range(int(os.environ.get("SUAVIZAR_ROSTO"))):
+            votes = np.zeros((len(lbl), K))
+            np.add.at(votes, (adj[:, 0], lbl[adj[:, 1]]), 1)
+            np.add.at(votes, (adj[:, 1], lbl[adj[:, 0]]), 1)
+            best = votes.argmax(1)
+            sw = hf & (votes[np.arange(len(lbl)), best] >= 2) & (votes[np.arange(len(lbl)), lbl] == 0)
+            lbl = np.where(sw, best, lbl)
+    # olhos com borda lisa (elipse) + brilho
+    eye_lbl = np.bincount(lbl[eyes], minlength=K).argmax()
+    gname = os.environ.get("BRILHO", "")
+    gl = [i for i, n in enumerate(names) if gname and n.lower().startswith(gname.lower())]
+    for mu, rr, a in eye_fit:
+        md = np.linalg.norm((cen[:, [0, 2]] - mu) / rr, axis=1)
+        near = head & (md < 1.35)
+        lbl[near & (md < 1.0)] = eye_lbl
+        lbl[near & (md >= 1.0) & (lab[:, 0] < 40) & (cen[:, 2] < mu[1] + 0.9 * rr[1])] = pele  # anel escuro -> pele (sem tocar sobrancelha)
+        if gl:
+            gc = mu + np.array([0.42, 0.42]) * rr
+            lbl[near & (md < 1.0) & (np.linalg.norm(cen[:, [0, 2]] - gc, axis=1) < 0.2 * a)] = gl[0]
 rgbC = np.array([hx(h) for h in hexes], float)
 print("cores:", dict(zip(names, np.bincount(lbl, minlength=K).tolist())))
 
