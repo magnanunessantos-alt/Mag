@@ -16,7 +16,7 @@ LEG = [
     (8.00, 10.80, "Somos da Paróquia Nossa Senhora da Conceição."),
     (11.25, 14.25, "Venham para a festa da Imaculada Conceição!"),
     (14.45, 17.65, "A festa começa no dia 28 de novembro."),
-    (18.10, 21.85, "E logo depois começam os festejos de São Benedito."),
+    (18.10, 21.85, "E logo depois, no dia 13/12, começam os festejos de São Benedito."),
     (22.00, 25.00, "Este ano eu completo 500 anos!"),
     (25.50, 27.05, "Venham todos!"),
     (27.20, 29.20, "Esperamos vocês!"),
@@ -30,12 +30,15 @@ def wrap(d, text, font, maxw):
         if d.textlength(t, font=font) <= maxw: cur = t
         else: lines.append(cur); cur = w
     lines.append(cur)
-    if len(lines) == 2:   # equilibra as duas linhas
+    n = len(lines)
+    if n in (2, 3):   # equilibra as linhas (evita palavra sozinha)
+        from itertools import combinations
         best = None
-        for k in range(1, len(words)):
-            l1, l2 = " ".join(words[:k]), " ".join(words[k:])
-            m = max(d.textlength(l1, font=font), d.textlength(l2, font=font))
-            if m <= maxw and (best is None or m < best[0]): best = (m, [l1, l2])
+        for cut in combinations(range(1, len(words)), n - 1):
+            idx = (0,) + cut + (len(words),)
+            ls = [" ".join(words[idx[i]:idx[i + 1]]) for i in range(n)]
+            mw = max(d.textlength(l, font=font) for l in ls)
+            if mw <= maxw and (best is None or mw < best[0]): best = (mw, ls)
         if best: lines = best[1]
     return lines
 
@@ -61,11 +64,12 @@ def banner_png(W, H, top, bw, scale, path):
     im = Image.alpha_composite(im, sh.filter(ImageFilter.GaussianBlur(10 * s))); d = ImageDraw.Draw(im)
     d.rounded_rectangle([x0, top, x1, top + h], radius=34 * s, fill=BROWN + (228,), outline=GOLD + (255,), width=max(3, int(4 * s)))
     ft = ImageFont.truetype(FSERIF, int(36 * s))
-    title = "FESTA DA IMACULADA CONCEIÇÃO"
+    title = "FESTA DA IMACULADA CONCEIÇÃO E DE SÃO BENEDITO"
+    while d.textlength(title, font=ft) > bw - 50 * s: ft = ImageFont.truetype(FSERIF, ft.size - 1)
     tw = d.textlength(title, font=ft); d.text(((W - tw) / 2, top + 22 * s), title, font=ft, fill=GOLD + (255,))
-    cols = [("28/11", "Abertura"), ("29/11 a 07/12", "Novena"), ("08/12", "Festa da Imaculada")]
-    fd = ImageFont.truetype(FB, int(46 * s)); fl = ImageFont.truetype(FS, int(27 * s))
-    widths = [1.0, 1.45, 1.25]; tot = sum(widths); cx = x0 + 18 * s; inner = bw - 36 * s
+    cols = [("28/11", "Abertura"), ("29/11 a 07/12", "Novena"), ("08/12", "Festa da Imaculada"), ("13/12", "Festejos de São Benedito")]
+    fd = ImageFont.truetype(FB, int(42 * s)); fl = ImageFont.truetype(FS, int(25 * s))
+    widths = [0.9, 1.55, 1.05, 1.1]; tot = sum(widths); cx = x0 + 18 * s; inner = bw - 36 * s
     yd, yl = top + 90 * s, top + 158 * s
     for i, ((dt, lb), wf) in enumerate(zip(cols, widths)):
         cw = inner * wf / tot; mid = cx + cw / 2
@@ -73,9 +77,15 @@ def banner_png(W, H, top, bw, scale, path):
         while d.textlength(dt, font=f2) > cw - 14 * s: f2 = ImageFont.truetype(FB, f2.size - 2)
         d.text((mid - d.textlength(dt, font=f2) / 2, yd + (fd.size - f2.size) / 2), dt, font=f2, fill=CREAM + (255,))
         f3 = fl
-        while d.textlength(lb, font=f3) > cw - 10 * s: f3 = ImageFont.truetype(FS, f3.size - 1)
-        d.text((mid - d.textlength(lb, font=f3) / 2, yl), lb, font=f3, fill=GOLD + (255,))
-        if i < 2: d.line([cx + cw, top + 92 * s, cx + cw, top + h - 26 * s], fill=GOLD + (170,), width=max(2, int(2 * s)))
+        parts = [lb]
+        if d.textlength(lb, font=f3) > cw - 10 * s and " " in lb:   # rotulo longo: duas linhas
+            ws = lb.split(); k = min(range(1, len(ws)), key=lambda k: max(d.textlength(" ".join(ws[:k]), font=f3), d.textlength(" ".join(ws[k:]), font=f3)))
+            parts = [" ".join(ws[:k]), " ".join(ws[k:])]
+        while max(d.textlength(p, font=f3) for p in parts) > cw - 10 * s: f3 = ImageFont.truetype(FS, f3.size - 1)
+        y0 = yl - (f3.size * 0.55 if len(parts) == 2 else 0)
+        for j, p in enumerate(parts):
+            d.text((mid - d.textlength(p, font=f3) / 2, y0 + j * f3.size * 1.12), p, font=f3, fill=GOLD + (255,))
+        if i < len(cols) - 1: d.line([cx + cw, top + 92 * s, cx + cw, top + h - 26 * s], fill=GOLD + (170,), width=max(2, int(2 * s)))
         cx += cw
     im.save(path)
 
