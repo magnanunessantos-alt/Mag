@@ -67,7 +67,7 @@ def banner_png(W, H, top, bw, scale, path):
     title = "FESTA DA IMACULADA CONCEIÇÃO E DE SÃO BENEDITO"
     while d.textlength(title, font=ft) > bw - 50 * s: ft = ImageFont.truetype(FSERIF, ft.size - 1)
     tw = d.textlength(title, font=ft); d.text(((W - tw) / 2, top + 22 * s), title, font=ft, fill=GOLD + (255,))
-    cols = [("28/11", "Abertura"), ("29/11 a 07/12", "Novena"), ("08/12", "Festa da Imaculada"), ("13/12", "Festejos de São Benedito")]
+    cols = [("28/11", "Abertura"), ("29/11 a 07/12", "Novena"), ("08/12", "Festa da Imaculada"), ("13/12", "São Benedito\nCortada do Mastro")]
     fd = ImageFont.truetype(FB, int(42 * s)); fl = ImageFont.truetype(FS, int(25 * s))
     widths = [0.9, 1.55, 1.05, 1.1]; tot = sum(widths); cx = x0 + 18 * s; inner = bw - 36 * s
     yd, yl = top + 90 * s, top + 158 * s
@@ -77,8 +77,8 @@ def banner_png(W, H, top, bw, scale, path):
         while d.textlength(dt, font=f2) > cw - 14 * s: f2 = ImageFont.truetype(FB, f2.size - 2)
         d.text((mid - d.textlength(dt, font=f2) / 2, yd + (fd.size - f2.size) / 2), dt, font=f2, fill=CREAM + (255,))
         f3 = fl
-        parts = [lb]
-        if d.textlength(lb, font=f3) > cw - 10 * s and " " in lb:   # rotulo longo: duas linhas
+        parts = lb.split("\n")
+        if len(parts) == 1 and d.textlength(lb, font=f3) > cw - 10 * s and " " in lb:   # rotulo longo: duas linhas
             ws = lb.split(); k = min(range(1, len(ws)), key=lambda k: max(d.textlength(" ".join(ws[:k]), font=f3), d.textlength(" ".join(ws[k:]), font=f3)))
             parts = [" ".join(ws[:k]), " ".join(ws[k:])]
         while max(d.textlength(p, font=f3) for p in parts) > cw - 10 * s: f3 = ImageFont.truetype(FS, f3.size - 1)
