@@ -16,8 +16,8 @@ LEG = [
     (8.00, 10.80, "Somos da Paróquia Nossa Senhora da Conceição."),
     (11.25, 14.25, "Venham para a festa da Imaculada Conceição!"),
     (14.45, 17.65, "A festa começa no dia 28 de novembro."),
-    (18.10, 21.85, "E logo após, no dia 13 de dezembro, começam os festejos de São Benedito."),
-    (22.00, 25.00, "Este ano eu completo 500 anos!"),
+    (17.80, 22.05, "E logo após, no dia 13 de dezembro, começam os festejos de São Benedito."),
+    (22.08, 25.00, "Este ano eu completo 500 anos!"),
     (25.50, 27.05, "Venham todos!"),
     (27.20, 29.20, "Esperamos vocês!"),
 ]
