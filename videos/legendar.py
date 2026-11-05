@@ -7,6 +7,7 @@ SRC, AUDIO, OUT = sys.argv[1:4]
 TMP = os.path.join(OUT, "_overlays"); os.makedirs(TMP, exist_ok=True)
 FB = "/usr/share/fonts/opentype/inter/Inter-ExtraBold.otf"
 FS = "/usr/share/fonts/opentype/inter/Inter-Bold.otf"
+FCAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fontes", "Poppins_600SemiBold.ttf")
 FSERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
 
 LEG = [
@@ -40,15 +41,15 @@ def wrap(d, text, font, maxw):
 
 def caption_png(text, W, H, y_center, size, maxw, path):
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    f = ImageFont.truetype(FS, size)
+    f = ImageFont.truetype(FCAP, size)
     lines = wrap(d, text, f, maxw)
-    lh = int(size * 1.22); th = lh * len(lines)
+    lh = int(size * 1.30); th = lh * len(lines)
     bw = max(d.textlength(l, font=f) for l in lines) + size * 1.1
     bx0 = (W - bw) / 2; by0 = y_center - th / 2 - size * 0.35
     d.rounded_rectangle([bx0, by0, bx0 + bw, by0 + th + size * 0.7], radius=size * 0.45, fill=(20, 12, 8, 165))
     for i, l in enumerate(lines):
         tw = d.textlength(l, font=f); x = (W - tw) / 2; y = by0 + size * 0.35 + i * lh
-        d.text((x, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=max(2, size // 18), stroke_fill=(0, 0, 0, 255))
+        d.text((x, y - size * 0.12), l, font=f, fill=(255, 255, 255, 255), stroke_width=max(2, size // 18), stroke_fill=(0, 0, 0, 255))
     im.save(path)
 
 def banner_png(W, H, top, bw, scale, path):
