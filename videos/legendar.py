@@ -16,9 +16,9 @@ LEG = [
     (8.00, 10.80, "Somos da Paróquia Nossa Senhora da Conceição."),
     (11.25, 14.25, "Venham para a festa da Imaculada Conceição!"),
     (14.45, 17.65, "A festa começa no dia 28 de novembro."),
-    (17.62, 22.52, "E logo depois, no dia 13 de dezembro, começam os festejos de São Benedito."),
-    (22.58, 25.55, "Este ano, eu completo 500 anos!"),
-    (25.60, 27.05, "Venham todos!"),
+    (18.10, 21.85, "E logo depois, no dia 13 de dezembro, começam os festejos de São Benedito."),
+    (22.05, 25.00, "Este ano, eu completo 500 anos!"),
+    (25.50, 27.05, "Venham todos!"),
     (27.20, 29.20, "Esperamos vocês!"),
 ]
 GOLD, BROWN, CREAM = (242, 193, 78), (52, 30, 18), (255, 248, 235)
